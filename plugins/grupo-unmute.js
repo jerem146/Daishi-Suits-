@@ -1,28 +1,26 @@
-// plugins/unmute.js
-
 let handler = async (m, { conn, text, usedPrefix, command }) => {
-    let user = m.mentionedJid && m.mentionedJid[0] ? m.mentionedJid[0] : m.quoted ? m.quoted.sender : null;
-    if (!user) return m.reply(`❮✦❯ Para desmutear a un usuario, menciónalo o responde a uno de sus mensajes.\n\n> → Ejemplo:\n*${usedPrefix + command} @usuario*`);
+  if (!m.isGroup) throw `『✦』Este comando solo se puede usar en grupos.`
+  if (!m.isAdmin) throw `『✦』Solo los *administradores* pueden usar este comando.`
 
-    let dbUser = global.db.data.users[user];
-    if (!dbUser || !dbUser.muto) {
-        return m.reply('❮✦❯ Este usuario no se encuentra muteado.');
-    }
+  let who
+  if (m.isGroup) who = m.mentionedJid[0] ? m.mentionedJid[0] : m.quoted ? m.quoted.sender : false
+  if (!who) throw `『✦』Etiqueta o responde al usuario que quieres desmutear.\n\nEjemplo: *${usedPrefix + command} @user*`
 
-    // Cambiamos el estado de 'muto' y reseteamos el contador
-    dbUser.muto = false;
-    dbUser.muteWarn = 0;
+  let user = global.db.data.users[who]
+  if (!user) throw `『✦』Usuario no encontrado en la base de datos.`
 
-    let mentionedUser = `@${user.split('@')[0]}`;
-    await conn.reply(m.chat, `*${mentionedUser} ha sido desmuteado.*\n\n❮✦❯ Ahora puede volver a enviar mensajes en el grupo.`, m, { mentions: [user] });
+  if (!user.muto) throw `『✦』El usuario no está silenciado.`
+
+  user.muto = false
+  user.muteWarn = 0
+
+  await conn.reply(m.chat, `『🔊』@${who.split`@`[0]} fue *desmuteado* correctamente.`, m, { mentions: [who] })
 }
+handler.help = ['unmute @user']
+handler.tags = ['group']
+handler.command = /^unmute$/i
+handler.group = true
+handler.admin = true
+handler.botAdmin = false
 
-handler.help = ['unmute @usuario'];
-handler.tags = ['group'];
-handler.command = /^(unmute|desmutear)$/i;
-
-handler.group = true;
-handler.admin = true;
-handler.botAdmin = true;
-
-export default handler;
+export default handler
