@@ -5,6 +5,7 @@ import path, { join } from 'path'
 import { unwatchFile, watchFile } from 'fs'
 import chalk from 'chalk'
 import fetch from 'node-fetch'
+import ws from 'ws'
 
 const { proto } = (await import('@whiskeysockets/baileys')).default
 const isNumber = x => typeof x === 'number' && !isNaN(x)
@@ -67,6 +68,8 @@ if (!isNumber(user.lastmining))
 user.lastmining = 0
 if (!('muto' in user))
 user.muto = false
+if (!isNumber(user.muteWarn)) // <-- [AÑADIDO]
+user.muteWarn = 0
 if (!('premium' in user))
 user.premium = false
 if (!user.premium)
@@ -124,6 +127,8 @@ lastpago: 0,
 lastmining: 0,
 lastcodereg: 0,
 muto: false,
+muteWarn: 0, // <-- [AÑADIDO]
+warn: 0, // <-- [AÑADIDO]
 registered: false,
 genre: '',
 birth: '',
@@ -231,7 +236,7 @@ const detectwhat = m.sender.includes('@lid') ? '@lid' : '@s.whatsapp.net';
 const isROwner = [...global.owner.map(([number]) => number)].map(v => v.replace(/[^0-9]/g, '') + detectwhat).includes(m.sender)
 const isOwner = isROwner || m.fromMe
 const isMods = isROwner || global.mods.map(v => v.replace(/[^0-9]/g, '') + detectwhat).includes(m.sender)
-const isPrems = isROwner || global.prems.map(v => v.replace(/[^0-9]/g, '') + detectwhat).includes(m.sender) || _user.premium == true
+const isPrems = isROwner || global.prems.map(v => v.replace(/[^0-9]/g, '') + detectwhat).includes(m.sender) || (_user && _user.premium)
 
 if (m.isBaileys) return
 if (opts['nyimak'])  return
@@ -259,11 +264,11 @@ if (id.endsWith('@lid')) return id
 const res = await conn.onWhatsApp(id).catch(() => [])
 return res[0]?.lid || id
 }
-const senderLid = await getLidFromJid(m.sender, conn)
-const botLid = await getLidFromJid(conn.user.jid, conn)
+const senderLid = await getLidFromJid(m.sender, this)
+const botLid = await getLidFromJid(this.user.jid, this)
 const senderJid = m.sender
-const botJid = conn.user.jid
-const groupMetadata = m.isGroup ? ((conn.chats[m.chat] || {}).metadata || await this.groupMetadata(m.chat).catch(_ => null)) : {}
+const botJid = this.user.jid
+const groupMetadata = m.isGroup ? ((this.chats[m.chat] || {}).metadata || await this.groupMetadata(m.chat).catch(_ => null)) : {}
 const participants = m.isGroup ? (groupMetadata.participants || []) : []
 const user = participants.find(p => p.id === senderLid || p.jid === senderJid) || {}
 const bot = participants.find(p => p.id === botLid || p.id === botJid) || {}
@@ -294,7 +299,7 @@ if (plugin.tags && plugin.tags.includes('admin')) {
 continue
 }
 const str2Regex = str => str.replace(/[|\\{}()[\]^$+*?.]/g, '\\$&')
-let _prefix = plugin.customPrefix ? plugin.customPrefix : conn.prefix ? conn.prefix : global.prefix
+let _prefix = plugin.customPrefix ? plugin.customPrefix : this.prefix ? this.prefix : global.prefix
 let match = (_prefix instanceof RegExp ? 
 [[_prefix.exec(m.text), _prefix]] :
 Array.isArray(_prefix) ?
@@ -378,7 +383,7 @@ return
 
 let hl = _prefix 
 let adminMode = global.db.data.chats[m.chat].modoadmin
-let mini = `${plugins.botAdmin || plugins.admin || plugins.group || plugins || noPrefix || hl ||  m.text.slice(0, 1) == hl || plugins.command}`
+let mini = `${plugin.botAdmin || plugin.admin || plugin.group || noPrefix || hl || m.text.slice(0, 1) == hl || plugin.command}`
 if (adminMode && !isOwner && !isROwner && m.isGroup && !isAdmin && mini) return   
 if (plugin.rowner && plugin.owner && !(isROwner || isOwner)) { 
 fail('owner', m, this)
@@ -422,11 +427,11 @@ m.isCommand = true
 let xp = 'exp' in plugin ? parseInt(plugin.exp) : 10
 m.exp += xp
 if (!isPrems && plugin.coin && global.db.data.users[m.sender].coin < plugin.coin * 1) {
-conn.reply(m.chat, `❮✦❯ Se agotaron tus ${moneda}`, m)
+this.reply(m.chat, `❮✦❯ Se agotaron tus ${global.moneda || 'monedas'}`, m)
 continue
 }
 if (plugin.level > _user.level) {
-conn.reply(m.chat, `❮✦❯ Se requiere el nivel: *${plugin.level}*\n\n• Tu nivel actual es: *${_user.level}*\n\n• Usa este comando para subir de nivel:\n*${usedPrefix}levelup*`, m)
+this.reply(m.chat, `❮✦❯ Se requiere el nivel: *${plugin.level}*\n\n• Tu nivel actual es: *${_user.level}*\n\n• Usa este comando para subir de nivel:\n*${usedPrefix}levelup*`, m)
 continue
 }
 let extra = {
@@ -473,7 +478,7 @@ await plugin.after.call(this, m, extra)
 console.error(e)
 }}
 if (m.coin)
-conn.reply(m.chat, `❮✦❯ Utilizaste ${+m.coin} ${moneda}`, m)
+this.reply(m.chat, `❮✦❯ Utilizaste ${+m.coin} ${global.moneda || 'monedas'}`, m)
 }
 break
 }}
@@ -485,44 +490,82 @@ const quequeIndex = this.msgqueque.indexOf(m.id || m.key.id)
 if (quequeIndex !== -1)
 this.msgqueque.splice(quequeIndex, 1)
 }
-let user, stats = global.db.data.stats
-if (m) { let utente = global.db.data.users[m.sender]
-if (utente.muto == true) {
-let bang = m.key.id
-let cancellazzione = m.key.participant
-await conn.sendMessage(m.chat, { delete: { remoteJid: m.chat, fromMe: false, id: bang, participant: cancellazzione }})
-}
-if (m.sender && (user = global.db.data.users[m.sender])) {
-user.exp += m.exp
-user.coin -= m.coin * 1
-}
 
-let stat
-if (m.plugin) {
-let now = +new Date
-if (m.plugin in stats) {
-stat = stats[m.plugin]
-if (!isNumber(stat.total))
-stat.total = 1
-if (!isNumber(stat.success))
-stat.success = m.error != null ? 0 : 1
-if (!isNumber(stat.last))
-stat.last = now
-if (!isNumber(stat.lastSuccess))
-stat.lastSuccess = m.error != null ? 0 : now
-} else
-stat = stats[m.plugin] = {
-total: 1,
-success: m.error != null ? 0 : 1,
-last: now,
-lastSuccess: m.error != null ? 0 : now
+// --- [INICIO] LÓGICA DE MUTEO Y ADVERTENCIA PROGRESIVA ---
+if (m) {
+    let user = global.db.data.users[m.sender];
+    let stats = global.db.data.stats;
+
+    if (user && user.muto === true && m.isGroup && !m.isBaileys) {
+        // 1. Siempre se elimina el mensaje del usuario muteado
+        try {
+            await this.sendMessage(m.chat, { delete: m.key });
+        } catch (e) {
+            console.error(`[Mute Handler] Error al eliminar mensaje: ${e}`);
+        }
+
+        // 2. Se verifica el contador para decidir la siguiente acción
+        if (user.muteWarn === 2) {
+            // Este es el 3er mensaje. Se envía la advertencia final.
+            try {
+                await this.sendMessage(m.chat, { 
+                    text: `*⚠️ ADVERTENCIA ⚠️*\n\n@${m.sender.split('@')[0]}, estás silenciado. Si vuelves a enviar un mensaje, serás eliminado automáticamente.`, 
+                    mentions: [m.sender] 
+                });
+                user.muteWarn += 1; // Se incrementa el contador a 3
+            } catch (e) {
+                console.error(`[Mute Handler] Error al enviar advertencia: ${e}`);
+            }
+
+        } else if (user.muteWarn >= 3) {
+            // Este es el 4to mensaje (o más). Se elimina al usuario.
+            try {
+                await this.groupParticipantsUpdate(m.chat, [m.sender], 'remove');
+            } catch (e) {
+                console.error(`[Mute Handler] Error al eliminar al participante: ${e}`);
+            }
+            // Importante: Se resetea el contador y el estado de muteo del usuario
+            user.muteWarn = 0;
+            user.muto = false;
+
+        } else {
+            // Este es el 1er o 2do mensaje. Solo se incrementa el contador silenciosamente.
+            user.muteWarn += 1;
+        }
+    }
+
+    // Se asegura que el usuario no gane exp ni gaste monedas mientras está muteado
+    if (m.sender && user && user.muto === false) {
+        user.exp += m.exp;
+        user.coin -= m.coin * 1;
+    }
+
+    let stat;
+    if (m.plugin) {
+        let now = +new Date;
+        if (m.plugin in stats) {
+            stat = stats[m.plugin];
+            if (!isNumber(stat.total)) stat.total = 1;
+            if (!isNumber(stat.success)) stat.success = m.error != null ? 0 : 1;
+            if (!isNumber(stat.last)) stat.last = now;
+            if (!isNumber(stat.lastSuccess)) stat.lastSuccess = m.error != null ? 0 : now;
+        } else {
+            stat = stats[m.plugin] = {
+                total: 1,
+                success: m.error != null ? 0 : 1,
+                last: now,
+                lastSuccess: m.error != null ? 0 : now
+            };
+        }
+        stat.total += 1;
+        stat.last = now;
+        if (m.error == null) {
+            stat.success += 1;
+            stat.lastSuccess = now;
+        }
+    }
 }
-stat.total += 1
-stat.last = now
-if (m.error == null) {
-stat.success += 1
-stat.lastSuccess = now
-}}}
+// --- [FIN] LÓGICA DE MUTEO ---
 
 try {
 if (!opts['noprint']) await (await import(`./lib/print.js`)).default(m, this)
@@ -531,29 +574,34 @@ console.log(m, m.quoted, e)}
 let settingsREAD = global.db.data.settings[this.user.jid] || {}  
 if (opts['autoread']) await this.readMessages([m.key])
 
-if (db.data.chats[m.chat].reaction && m.text.match(/(ción|dad|aje|oso|izar|mente|pero|tion|age|ous|ate|and|but|ify|ai|yuki|a|s)/gi)) {
+if (global.db.data.chats[m.chat]?.reaction && m.text.match(/(ción|dad|aje|oso|izar|mente|pero|tion|age|ous|ate|and|but|ify|ai|yuki|a|s)/gi)) {
 let emot = pickRandom(["🍟", "😃", "😄", "😁", "😆", "🍓", "😅", "😂", "🤣", "🥲", "☺️", "😊", "😇", "🙂", "🙃", "😉", "😌", "😍", "🥰", "😘", "😗", "😙", "🌺", "🌸", "😚", "😋", "😛", "😝", "😜", "🤪", "🤨", "🌟", "🤓", "😎", "🥸", "🤩", "🥳", "😏", "💫", "😞", "😔", "😟", "😕", "🙁", "☹️", "😣", "😖", "😫", "😩", "🥺", "😢", "😭", "😤", "😠", "😡", "🤬", "🤯", "😳", "🥵", "🥶", "😶‍🌫️", "😱", "😨", "😰", "😥", "😓", "🤗", "🤔", "🫣", "🤭", "🤖", "🍭", "🤫", "🫠", "🤥", "😶", "📇", "😐", "💧", "😑", "🫨", "😬", "🙄", "😯", "😦", "😧", "😮", "😲", "🥱", "😴", "🤤", "😪", "😮‍💨", "😵", "😵‍💫", "🤐", "🥴", "🤢", "🤮", "🤧", "😷", "🤒", "🤕", "🤑", "🤠", "😈", "👿", "👺", "🧿", "🌩", "👻", "😺", "😸", "😹", "😻", "😼", "😽", "🙀", "😿", "😾", "🫶", "👍", "✌️", "🙏", "🫵", "🤏", "🤌", "☝️", "🖕", "🙏", "🫵", "🫂", "🐱", "🤹‍♀️", "🤹‍♂️", "🗿", "✨", "⚡", "🔥", "🌈", "🩷", "❤️", "🧡", "💛", "💚", "🩵", "💙", "💜", "🖤", "🩶", "🤍", "🤎", "💔", "❤️‍🔥", "❤️‍🩹", "❣️", "💕", "💞", "💓", "💗", "💖", "💘", "💝", "🚩", "👊", "⚡️", "💋", "🫰", "💅", "👑", "🐣", "🐤", "🐈"])
 if (!m.fromMe) return this.sendMessage(m.chat, { react: { text: emot, key: m.key }})
 }
 function pickRandom(list) { return list[Math.floor(Math.random() * list.length)]}
 }}
 
-global.dfail = (type, m, usedPrefix, command, conn) => {
+global.dfail = (type, m, conn, usedPrefix, command) => {
+    if (!Array.prototype.getRandom) {
+      Array.prototype.getRandom = function() {
+        return this[Math.floor(Math.random() * this.length)];
+      };
+    }
 
 let edadaleatoria = ['10', '28', '20', '40', '18', '21', '15', '11', '9', '17', '25'].getRandom()
 let user2 = m.pushName || 'Anónimo'
 let verifyaleatorio = ['registrar', 'reg', 'verificar', 'verify', 'register'].getRandom()
 
 const msg = {
-rowner: `『✦』El comando *${comando}* solo puede ser usado por los creadores del bot.`, 
-owner: `『✦』El comando *${comando}* solo puede ser usado por los desarrolladores del bot.`, 
-mods: `『✦』El comando *${comando}* solo puede ser usado por los moderadores del bot.`, 
-premium: `『✦』El comando *${comando}* solo puede ser usado por los usuarios premium.`, 
-group: `『✦』El comando *${comando}* solo puede ser usado en grupos.`,
-private: `『✦』El comando *${comando}* solo puede ser usado al chat privado del bot.`,
-admin: `『✦』El comando *${comando}* solo puede ser usado por los administradores del grupo.`, 
-botAdmin: `『✦』Para ejecutar el comando *${comando}* debo ser administrador del grupo.`,
-unreg: `『✦』El comando *${comando}* solo puede ser usado por los usuarios registrado, registrate usando:\n> » #${verifyaleatorio} ${user2}.${edadaleatoria}`,
+rowner: `『✦』El comando *${command}* solo puede ser usado por los creadores del bot.`, 
+owner: `『✦』El comando *${command}* solo puede ser usado por los desarrolladores del bot.`, 
+mods: `『✦』El comando *${command}* solo puede ser usado por los moderadores del bot.`, 
+premium: `『✦』El comando *${command}* solo puede ser usado por los usuarios premium.`, 
+group: `『✦』El comando *${command}* solo puede ser usado en grupos.`,
+private: `『✦』El comando *${command}* solo puede ser usado al chat privado del bot.`,
+admin: `『✦』El comando *${command}* solo puede ser usado por los administradores del grupo.`, 
+botAdmin: `『✦』Para ejecutar el comando *${command}* debo ser administrador del grupo.`,
+unreg: `『✦』El comando *${command}* solo puede ser usado por los usuarios registrado, registrate usando:\n> » #${verifyaleatorio} ${user2}.${edadaleatoria}`,
 restrict: `『✦』Esta caracteristica está desactivada.`
 }[type];
 if (msg) return m.reply(msg).then(_ => m.react('✖️'))}
