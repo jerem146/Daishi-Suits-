@@ -1,37 +1,55 @@
 // plugins/mute.js
+function jidNormalized(jid) {
+  if (!jid) return null;
+  if (typeof jid === 'object') jid = jid.id || jid.jid || jid.participant || jid;
+  jid = String(jid);
+  jid = jid.split(':')[0]; // quitar sufijos tipo :1234
+  return jid;
+}
+function digitsOf(jid) {
+  const s = jidNormalized(jid) || '';
+  return s.replace(/\D/g, '');
+}
+function jidVariants(jid) {
+  const d = digitsOf(jid);
+  const base = jidNormalized(jid);
+  if (!d) return [base];
+  // variantes comunes
+  return Array.from(new Set([ base, `${d}@s.whatsapp.net`, `${d}@c.us`, `${d}@lid` ].filter(Boolean)));
+}
+
 let handler = async (m, { conn, participants, usedPrefix, command, isROwner, isOwner }) => {
-  if (!m.isGroup) return m.reply('『✦』Este comando solo se puede usar en grupos.')
+  try {
+    if (!m.isGroup) return m.reply('『✦』Este comando solo se puede usar en grupos.')
 
-  let part = (participants && participants.length) ? participants : (await conn.groupMetadata(m.chat).catch(()=>({ participants: [] }))).participants || []
-  const senderNum = (m.sender || '').split('@')[0]
+    // --- admin detection (tolerante) ---
+    let part = (participants && participants.length) ? participants : (await conn.groupMetadata(m.chat).catch(()=>({ participants: [] }))).participants || []
+    const senderNum = (m.sender || '').split('@')[0]
+    const isAdmin = part.some(p => {
+      const pid = ((p.id || p.jid || p.participant || '') + '').split('@')[0]
+      const adminFlag = p.admin ?? p.isAdmin ?? p.role ?? false
+      return pid === senderNum && (adminFlag === 'admin' || adminFlag === 'superadmin' || adminFlag === true)
+    })
+    if (!(isROwner || isOwner || isAdmin)) return m.reply('『✦』Solo los administradores pueden usar este comando.')
 
-  const isAdmin = part.some(p => {
-    const pid = ((p.id || p.jid || p.participant || '') + '').split('@')[0]
-    const adminFlag = p.admin ?? p.isAdmin ?? p.role ?? false
-    return pid === senderNum && (adminFlag === 'admin' || adminFlag === 'superadmin' || adminFlag === true)
-  })
-  if (!(isROwner || isOwner || isAdmin)) return m.reply('『✦』Solo los administradores pueden usar este comando.')
+    // --- detectar objetivo (responder o mencionar) ---
+    let whoOriginal = (m.mentionedJid && m.mentionedJid.length > 0) ? m.mentionedJid[0] : (m.quoted ? m.quoted.sender : null)
+    if (!whoOriginal) return m.reply(`『✦』Etiqueta o responde al usuario a silenciar.\nEjemplo: *${usedPrefix}${command} @usuario*`)
 
-  // 🔹 Normalizar JID objetivo
-  let who = null
-  if (m.mentionedJid && m.mentionedJid.length > 0) {
-    who = m.mentionedJid[0]
-  } else if (m.quoted) {
-    who = m.quoted.sender
+    const variants = jidVariants(whoOriginal)
+
+    // crear/actualizar todas las variantes para asegurar detección en middleware
+    for (const k of variants) {
+      if (!global.db.data.users[k]) global.db.data.users[k] = {}
+      global.db.data.users[k].muto = true
+      global.db.data.users[k].muteWarn = 0
+    }
+
+    await conn.reply(m.chat, `『🔇』 @${digitsOf(whoOriginal)} ha sido *silenciado* correctamente.`, m, { mentions: [whoOriginal] })
+  } catch (e) {
+    console.error(e)
+    throw e
   }
-  if (!who) return m.reply(`『✦』Etiqueta o responde al usuario a silenciar.\nEjemplo: *${usedPrefix}${command} @usuario*`)
-
-  // siempre normalizar jid
-  who = who.replace(/[^0-9]/g, '') + '@s.whatsapp.net'
-
-  if (!global.db.data.users[who]) global.db.data.users[who] = {}
-  let user = global.db.data.users[who]
-
-  if (user.muto) return m.reply('『✦』El usuario ya está silenciado.')
-  user.muto = true
-  user.muteWarn = 0
-
-  await conn.reply(m.chat, `『🔇』 @${who.split('@')[0]} ha sido *silenciado*.`, m, { mentions: [who] })
 }
 
 handler.help = ['mute @user']
