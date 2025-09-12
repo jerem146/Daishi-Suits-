@@ -1,26 +1,26 @@
 let handler = async (m, { conn, text, usedPrefix, command }) => {
-    let user = m.mentionedJid && m.mentionedJid[0] ? m.mentionedJid[0] : m.quoted ? m.quoted.sender : null;
-    if (!user) return m.reply(`❮✦❯ Para mutear a un usuario, menciónalo o responde a uno de sus mensajes.\n\n> → Ejemplo:\n*${usedPrefix + command} @usuario*`);
+  if (!m.isGroup) throw `『✦』Este comando solo se puede usar en grupos.`
+  if (!m.isAdmin) throw `『✦』Solo los *administradores* pueden usar este comando.`
 
-    if (user === conn.user.jid) return m.reply('❮✦❯ No me puedo mutear a mí mismo.');
+  let who
+  if (m.isGroup) who = m.mentionedJid[0] ? m.mentionedJid[0] : m.quoted ? m.quoted.sender : false
+  if (!who) throw `『✦』Etiqueta o responde al usuario que quieres silenciar.\n\nEjemplo: *${usedPrefix + command} @user*`
 
-    let dbUser = global.db.data.users[user];
-    if (!dbUser) global.db.data.users[user] = {};
+  let user = global.db.data.users[who]
+  if (!user) throw `『✦』Usuario no encontrado en la base de datos.`
 
-    // Establecemos el estado de mute y reseteamos el contador de advertencias
-    global.db.data.users[user].muto = true;
-    global.db.data.users[user].muteWarn = 0;
+  if (user.muto) throw `『✦』El usuario ya está silenciado.`
 
-    let mentionedUser = `@${user.split('@')[0]}`;
-    await conn.reply(m.chat, `*${mentionedUser} ha sido muteado.*\n\n❮✦❯ A partir de ahora, sus mensajes serán eliminados. Si insiste, será expulsado.`, m, { mentions: [user] });
+  user.muto = true
+  user.muteWarn = 0
+
+  await conn.reply(m.chat, `『🔇』@${who.split`@`[0]} fue *silenciado* correctamente.`, m, { mentions: [who] })
 }
+handler.help = ['mute @user']
+handler.tags = ['group']
+handler.command = /^mute$/i
+handler.group = true
+handler.admin = true
+handler.botAdmin = false
 
-handler.help = ['mute @usuario'];
-handler.tags = ['group'];
-handler.command = /^(mute|mutear)$/i;
-
-handler.group = true;
-handler.admin = true;
-handler.botAdmin = true;
-
-export default handler;
+export default handler
