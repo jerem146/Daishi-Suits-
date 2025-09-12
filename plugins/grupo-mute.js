@@ -1,30 +1,46 @@
 // plugins/mute.js
-let handler = async (m, { conn, participants, usedPrefix, command }) => {
-  if (!m.isGroup) return m.reply('『✦』Este comando solo se puede usar en grupos.')
+let handler = async (m, { conn, participants, usedPrefix, command, isROwner, isOwner }) => {
+  try {
+    if (!m.isGroup) return m.reply('『✦』Este comando solo se puede usar en grupos.')
 
-  // Detectar si el que manda el mensaje es admin
-  const groupAdmins = participants.filter(p => p.admin).map(p => p.id)
-  const isAdmin = groupAdmins.includes(m.sender)
+    // fallback: si no recibimos participants desde el loader, intentar pedir metadata
+    let part = (participants && participants.length) ? participants : (await conn.groupMetadata(m.chat).catch(()=>({ participants: [] }))).participants || []
 
-  if (!isAdmin) return m.reply('『✦』Solo los administradores pueden usar este comando.')
+    // normalizar sender (sin dominio)
+    const senderNum = (m.sender || '').split('@')[0]
 
-  let who = (m.mentionedJid && m.mentionedJid[0]) ? m.mentionedJid[0] : (m.quoted ? m.quoted.sender : null)
-  if (!who) return m.reply(`『✦』Etiqueta o responde al usuario a silenciar.\nEjemplo: *${usedPrefix}mute @usuario*`)
+    // detectar admin de forma tolerante
+    const isAdmin = part.some(p => {
+      const pid = ((p.id || p.jid || p.participant || '') + '').split('@')[0]
+      const adminFlag = p.admin ?? p.isAdmin ?? p.role ?? false
+      return pid === senderNum && (adminFlag === 'admin' || adminFlag === 'superadmin' || adminFlag === true)
+    })
 
-  if (!global.db.data.users[who]) global.db.data.users[who] = {}
-  let user = global.db.data.users[who]
+    // permitir a creadores/owners pasar
+    if (!(isROwner || isOwner || isAdmin)) return m.reply('『✦』Solo los administradores pueden usar este comando.')
 
-  if (user.muto) return m.reply('『✦』El usuario ya está silenciado.')
-  user.muto = true
-  user.muteWarn = 0
+    // obtener objetivo
+    let who = (m.mentionedJid && m.mentionedJid[0]) ? m.mentionedJid[0] : (m.quoted ? m.quoted.sender : null)
+    if (!who) return m.reply(`『✦』Etiqueta o responde al usuario a silenciar.\nEjemplo: *${usedPrefix}${command} @usuario*`)
 
-  await conn.reply(m.chat, `『🔇』 @${who.split('@')[0]} ha sido *silenciado*.`, m, { mentions: [who] })
+    if (!global.db.data.users[who]) global.db.data.users[who] = {}
+    let user = global.db.data.users[who]
+
+    if (user.muto) return m.reply('『✦』El usuario ya está silenciado.')
+    user.muto = true
+    user.muteWarn = 0
+
+    await conn.reply(m.chat, `『🔇』 @${who.split('@')[0]} ha sido *silenciado* correctamente.`, m, { mentions: [who] })
+  } catch (e) {
+    console.error(e)
+    throw e
+  }
 }
 
 handler.help = ['mute @user']
 handler.tags = ['group']
-handler.command = ['mute']
+handler.command = ['mute','silenciar'] // alias
 handler.group = true
-handler.admin = false   // <- quitamos el chequeo automático, ya lo hacemos arriba
+handler.admin = false // lo controlamos manualmente arriba
 
 export default handler
