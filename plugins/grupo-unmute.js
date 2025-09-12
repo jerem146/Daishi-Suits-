@@ -14,7 +14,14 @@ let handler = async (m, { conn, participants, usedPrefix, command, isROwner, isO
 
     if (!(isROwner || isOwner || isAdmin)) return m.reply('『✦』Solo los administradores pueden usar este comando.')
 
-    let who = (m.mentionedJid && m.mentionedJid[0]) ? m.mentionedJid[0] : (m.quoted ? m.quoted.sender : null)
+    // 🔹 DETECTAR AL OBJETIVO
+    let who = null
+    if (m.mentionedJid && m.mentionedJid.length > 0) {
+      who = m.mentionedJid[0]
+    } else if (m.quoted) {
+      who = m.quoted.sender
+    }
+
     if (!who) return m.reply(`『✦』Etiqueta o responde al usuario a desmutear.\nEjemplo: *${usedPrefix}${command} @usuario*`)
 
     if (!global.db.data.users[who]) global.db.data.users[who] = {}
@@ -24,7 +31,7 @@ let handler = async (m, { conn, participants, usedPrefix, command, isROwner, isO
     user.muto = false
     user.muteWarn = 0
 
-    await conn.reply(m.chat, `『🔊』 @${who.split('@')[0]} ha sido *desmuteado* correctamente.`, m, { mentions: [who] })
+    await conn.reply(m.chat, `『🔊』 @${who.split('@')[0]} ha sido *desmuteado*.`, m, { mentions: [who] })
   } catch (e) {
     console.error(e)
     throw e
